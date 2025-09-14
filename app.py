@@ -1,7 +1,6 @@
 from flask import Flask, jsonify, request
-
-# from flask_sqlalchemy import SQLAlchemy
-from models import db  # , TiposContas
+from flask_sqlalchemy import SQLAlchemy
+from models import db, TiposContas, Categorias, Subcategorias
 import os  # Importa a biblioteca para interagir com o sistema operacional
 
 # Importa e carrega as variáveis do arquivo .env
@@ -92,6 +91,168 @@ def handle_tipo_conta(tipo_id):
         db.session.delete(tipo_conta)
         db.session.commit()
         return jsonify({"mensagem": "Tipo de conta deletado com sucesso!"}), 200
+
+
+# --- NOVAS ROTAS PARA CATEGORIAS ---
+
+
+# Rota para LISTAR todas as categorias ou CRIAR uma nova categoria
+@app.route("/categorias", methods=["GET", "POST"])
+def handle_categorias():
+    if request.method == "GET":
+        categorias = Categorias.query.all()
+        lista_categorias = []
+        for cat in categorias:
+            # Inclui as subcategorias na resposta da categoria
+            subcategorias = [
+                {"id": sub.subcategorias_id, "nome": sub.subcategorias_nome}
+                for sub in cat.subcategorias
+            ]
+            lista_categorias.append(
+                {
+                    "id": cat.categorias_id,
+                    "nome": cat.categorias_nome,
+                    "classe": cat.categorias_classe,
+                    "subcategorias": subcategorias,
+                }
+            )
+        return jsonify(lista_categorias), 200
+
+    elif request.method == "POST":
+        data = request.json
+        nome = data.get("categorias_nome")
+        classe = data.get("categorias_classe")
+        if not nome or classe is None:
+            return (
+                jsonify({"erro": "O nome e a classe da categoria são obrigatórios"}),
+                400,
+            )
+
+        nova_categoria = Categorias(categorias_nome=nome, categorias_classe=classe)
+        db.session.add(nova_categoria)
+        db.session.commit()
+        return (
+            jsonify(
+                {
+                    "mensagem": "Categoria criada com sucesso!",
+                    "id": nova_categoria.categorias_id,
+                }
+            ),
+            201,
+        )
+
+
+# Rota para OBTER, ATUALIZAR ou DELETAR uma categoria específica
+@app.route("/categorias/<int:categoria_id>", methods=["GET", "PUT", "DELETE"])
+def handle_categoria(categoria_id):
+    categoria = Categorias.query.get(categoria_id)
+    if not categoria:
+        return jsonify({"erro": "Categoria não encontrada"}), 404
+
+    if request.method == "GET":
+        subcategorias = [
+            {"id": sub.subcategorias_id, "nome": sub.subcategorias_nome}
+            for sub in categoria.subcategorias
+        ]
+        return (
+            jsonify(
+                {
+                    "id": categoria.categorias_id,
+                    "nome": categoria.categorias_nome,
+                    "classe": categoria.categorias_classe,
+                    "subcategorias": subcategorias,
+                }
+            ),
+            200,
+        )
+
+    elif request.method == "PUT":
+        data = request.json
+        nome = data.get("categorias_nome", categoria.categorias_nome)
+        classe = data.get("categorias_classe", categoria.categorias_classe)
+
+        categoria.categorias_nome = nome
+        categoria.categorias_classe = classe
+        db.session.commit()
+        return jsonify({"mensagem": "Categoria atualizada com sucesso!"}), 200
+
+    elif request.method == "DELETE":
+        # Se tentar deletar uma categoria com subcategorias, o banco de dados pode dar erro de chave estrangeira.
+        # Por enquanto, deixamos assim. Poderíamos adicionar a lógica de deleção em cascata no modelo.
+        db.session.delete(categoria)
+        db.session.commit()
+        return jsonify({"mensagem": "Categoria deletada com sucesso!"}), 200
+
+
+# --- NOVAS ROTAS PARA SUBCATEGORIAS ---
+
+
+# Rota para LISTAR subcategorias de uma categoria específica ou CRIAR uma nova
+@app.route("/categorias/<int:categoria_id>/subcategorias", methods=["GET", "POST"])
+def handle_subcategorias_por_categoria(categoria_id):
+    categoria = Categorias.query.get(categoria_id)
+    if not categoria:
+        return jsonify({"erro": "Categoria não encontrada"}), 404
+
+    if request.method == "GET":
+        subcategorias = [
+            {"id": sub.subcategorias_id, "nome": sub.subcategorias_nome}
+            for sub in categoria.subcategorias
+        ]
+        return jsonify(subcategorias), 200
+
+    elif request.method == "POST":
+        data = request.json
+        nome = data.get("subcategorias_nome")
+        if not nome:
+            return jsonify({"erro": "O nome da subcategoria é obrigatório"}), 400
+
+        nova_subcategoria = Subcategorias(
+            subcategorias_nome=nome, categorias_id=categoria_id
+        )
+        db.session.add(nova_subcategoria)
+        db.session.commit()
+        return (
+            jsonify(
+                {
+                    "mensagem": "Subcategoria criada com sucesso!",
+                    "id": nova_subcategoria.subcategorias_id,
+                }
+            ),
+            201,
+        )
+
+
+# Rota para OBTER, ATUALIZAR ou DELETAR uma subcategoria específica
+@app.route("/subcategorias/<int:subcategoria_id>", methods=["GET", "PUT", "DELETE"])
+def handle_subcategoria(subcategoria_id):
+    subcategoria = Subcategorias.query.get(subcategoria_id)
+    if not subcategoria:
+        return jsonify({"erro": "Subcategoria não encontrada"}), 404
+
+    if request.method == "GET":
+        return (
+            jsonify(
+                {
+                    "id": subcategoria.subcategorias_id,
+                    "nome": subcategoria.subcategorias_nome,
+                    "categoria_id": subcategoria.categorias_id,
+                }
+            ),
+            200,
+        )
+
+    elif request.method == "PUT":
+        data = request.json
+        nome = data.get("subcategorias_nome", subcategoria.subcategorias_nome)
+        subcategoria.subcategorias_nome = nome
+        db.session.commit()
+        return jsonify({"mensagem": "Subcategoria atualizada com sucesso!"}), 200
+
+    elif request.method == "DELETE":
+        db.session.delete(subcategoria)
+        db.session.commit()
+        return jsonify({"mensagem": "Subcategoria deletada com sucesso!"}), 200
 
 
 # Bloco para executar a aplicação
