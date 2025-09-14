@@ -7,10 +7,13 @@ from models import (
     Subcategorias,
     ContasBancarias,
     Operacoes,
-)  # Importe os novos modelos
+    Cartoes,
+    FaturasCartoes,
+)
 import os
 from dotenv import load_dotenv
 from datetime import date  # Importamos para usar datas
+
 
 load_dotenv()
 
@@ -551,6 +554,157 @@ def handle_conta_bancaria(conta_id):
         db.session.delete(conta)
         db.session.commit()
         return jsonify({"mensagem": "Conta deletada com sucesso!"}), 200
+
+
+# --- NOVAS ROTAS PARA CARTÕES E FATURAS ---
+
+
+# Rota para LISTAR todos os cartões ou CRIAR um novo
+@app.route("/cartoes", methods=["GET", "POST"])
+def handle_cartoes():
+    if request.method == "GET":
+        cartoes = Cartoes.query.all()
+        lista_cartoes = []
+        for cartao in cartoes:
+            # Inclui as faturas na resposta do cartão
+            faturas = [
+                {
+                    "id": fat.faturasCartoesId,
+                    "vencimento": str(fat.faturasCartoesDtVencimento),
+                }
+                for fat in cartao.faturas
+            ]
+            lista_cartoes.append(
+                {
+                    "id": cartao.cartoes_id,
+                    "nome": cartao.cartoes_nome,
+                    "final": cartao.cartoes_final,
+                    "tipo": cartao.cartoes_tipo,
+                    "faturas": faturas,
+                }
+            )
+        return jsonify(lista_cartoes), 200
+
+    elif request.method == "POST":
+        data = request.json
+        cartoes_nome = data.get("cartoes_nome")
+        cartoes_final = data.get("cartoes_final")
+        cartoes_tipo = data.get("cartoes_tipo")
+
+        if not all([cartoes_nome, cartoes_final, cartoes_tipo]):
+            return (
+                jsonify({"erro": "O nome, final e tipo do cartão são obrigatórios"}),
+                400,
+            )
+
+        novo_cartao = Cartoes(
+            cartoes_nome=cartoes_nome,
+            cartoes_final=cartoes_final,
+            cartoes_tipo=cartoes_tipo,
+        )
+        db.session.add(novo_cartao)
+        db.session.commit()
+        return (
+            jsonify(
+                {"mensagem": "Cartão criado com sucesso!", "id": novo_cartao.cartoes_id}
+            ),
+            201,
+        )
+
+
+# Rota para OBTER, ATUALIZAR ou DELETAR um cartão específico
+@app.route("/cartoes/<int:cartao_id>", methods=["GET", "PUT", "DELETE"])
+def handle_cartao(cartao_id):
+    cartao = Cartoes.query.get(cartao_id)
+    if not cartao:
+        return jsonify({"erro": "Cartão não encontrado"}), 404
+
+    if request.method == "GET":
+        faturas = [
+            {
+                "id": fat.faturasCartoesId,
+                "vencimento": str(fat.faturasCartoesDtVencimento),
+            }
+            for fat in cartao.faturas
+        ]
+        return (
+            jsonify(
+                {
+                    "id": cartao.cartoes_id,
+                    "nome": cartao.cartoes_nome,
+                    "final": cartao.cartoes_final,
+                    "tipo": cartao.cartoes_tipo,
+                    "faturas": faturas,
+                }
+            ),
+            200,
+        )
+
+    elif request.method == "PUT":
+        data = request.json
+        cartao.cartoes_nome = data.get("cartoes_nome", cartao.cartoes_nome)
+        cartao.cartoes_final = data.get("cartoes_final", cartao.cartoes_final)
+        cartao.cartoes_tipo = data.get("cartoes_tipo", cartao.cartoes_tipo)
+
+        db.session.commit()
+        return jsonify({"mensagem": "Cartão atualizado com sucesso!"}), 200
+
+    elif request.method == "DELETE":
+        db.session.delete(cartao)
+        db.session.commit()
+        return jsonify({"mensagem": "Cartão deletado com sucesso!"}), 200
+
+
+# Rota para LISTAR faturas de um cartão ou CRIAR uma nova fatura
+@app.route("/cartoes/<int:cartao_id>/faturas", methods=["GET", "POST"])
+def handle_faturas_por_cartao(cartao_id):
+    cartao = Cartoes.query.get(cartao_id)
+    if not cartao:
+        return jsonify({"erro": "Cartão não encontrado"}), 404
+
+    if request.method == "GET":
+        faturas = [
+            {
+                "id": fat.faturasCartoesId,
+                "vencimento": str(fat.faturasCartoesDtVencimento),
+            }
+            for fat in cartao.faturas
+        ]
+        return jsonify(faturas), 200
+
+    elif request.method == "POST":
+        data = request.json
+        dt_vencimento_str = data.get("faturasCartoesDtVencimento")
+        dt_fechamento_str = data.get("faturasCartoesFechamento")
+        valor = data.get("faturasCartoesValor")
+
+        if not all([dt_vencimento_str, dt_fechamento_str, valor]):
+            return jsonify({"erro": "Dados de fatura incompletos"}), 400
+
+        try:
+            dt_vencimento = date.fromisoformat(dt_vencimento_str)
+            dt_fechamento = date.fromisoformat(dt_fechamento_str)
+        except ValueError:
+            return jsonify({"erro": "Formato de data inválido. Use AAAA-MM-DD"}), 400
+
+        nova_fatura = FaturasCartoes(
+            faturasCartoesVinculado=cartao_id,
+            faturasCartoesDtVencimento=dt_vencimento,
+            faturasCartoesFechamento=dt_fechamento,
+            faturasCartoesValor=valor,
+        )
+
+        db.session.add(nova_fatura)
+        db.session.commit()
+        return (
+            jsonify(
+                {
+                    "mensagem": "Fatura criada com sucesso!",
+                    "id": nova_fatura.faturasCartoesId,
+                }
+            ),
+            201,
+        )
 
 
 # Bloco para executar a aplicação
