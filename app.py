@@ -1,10 +1,16 @@
 from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
-from models import db, TiposContas, Categorias, Subcategorias
-import os  # Importa a biblioteca para interagir com o sistema operacional
-
-# Importa e carrega as variáveis do arquivo .env
+from models import (
+    db,
+    TiposContas,
+    Categorias,
+    Subcategorias,
+    ContasBancarias,
+    Operacoes,
+)  # Importe os novos modelos
+import os
 from dotenv import load_dotenv
+from datetime import date  # Importamos para usar datas
 
 load_dotenv()
 
@@ -94,8 +100,6 @@ def handle_tipo_conta(tipo_id):
 
 
 # --- NOVAS ROTAS PARA CATEGORIAS ---
-
-
 # Rota para LISTAR todas as categorias ou CRIAR uma nova categoria
 @app.route("/categorias", methods=["GET", "POST"])
 def handle_categorias():
@@ -185,8 +189,6 @@ def handle_categoria(categoria_id):
 
 
 # --- NOVAS ROTAS PARA SUBCATEGORIAS ---
-
-
 # Rota para LISTAR subcategorias de uma categoria específica ou CRIAR uma nova
 @app.route("/categorias/<int:categoria_id>/subcategorias", methods=["GET", "POST"])
 def handle_subcategorias_por_categoria(categoria_id):
@@ -253,6 +255,302 @@ def handle_subcategoria(subcategoria_id):
         db.session.delete(subcategoria)
         db.session.commit()
         return jsonify({"mensagem": "Subcategoria deletada com sucesso!"}), 200
+
+
+# --- NOVAS ROTAS PARA LANÇAMENTOS (OPERAÇÕES) ---
+# Rota para LISTAR todos os lançamentos ou CRIAR um novo
+@app.route("/lancamentos", methods=["GET", "POST"])
+def handle_lancamentos():
+    if request.method == "GET":
+        lancamentos = Operacoes.query.all()
+        lista_lancamentos = []
+        for lancamento in lancamentos:
+            # Acessamos os dados das tabelas relacionadas
+            subcategoria = Subcategorias.query.get(lancamento.subcategorias_id)
+            conta_bancaria = ContasBancarias.query.get(lancamento.contas_bancarias_id)
+
+            lista_lancamentos.append(
+                {
+                    "id": lancamento.operacoes_id,
+                    "tipo": lancamento.operacoes_tipo,
+                    "descricao": lancamento.operacoes_descricao,
+                    "data": str(lancamento.operacoes_data),
+                    "valor": str(lancamento.operacoes_valor),
+                    "conta": {
+                        "id": conta_bancaria.idcontas_bancarias,
+                        "nome": conta_bancaria.nome_conta,
+                    },
+                    "subcategoria": {
+                        "id": subcategoria.subcategorias_id,
+                        "nome": subcategoria.subcategorias_nome,
+                        "categoria": subcategoria.categoria.categorias_nome,  # Acessa a categoria principal
+                    },
+                }
+            )
+        return jsonify(lista_lancamentos), 200
+
+    elif request.method == "POST":
+        data = request.json
+        # A API espera o ID das chaves estrangeiras
+        operacoes_tipo = data.get("operacoes_tipo")
+        operacoes_descricao = data.get("operacoes_descricao")
+        operacoes_data = data.get("operacoes_data")
+        operacoes_valor = data.get("operacoes_valor")
+        contas_bancarias_id = data.get("contas_bancarias_id")
+        subcategorias_id = data.get("subcategorias_id")
+
+        # Validação simples
+        if not all(
+            [
+                operacoes_tipo,
+                operacoes_descricao,
+                operacoes_data,
+                operacoes_valor,
+                contas_bancarias_id,
+                subcategorias_id,
+            ]
+        ):
+            return jsonify({"erro": "Dados incompletos"}), 400
+
+        # Converte a string de data para um objeto date
+        try:
+            data_lancamento = date.fromisoformat(operacoes_data)
+        except ValueError:
+            return jsonify({"erro": "Formato de data inválido. Use AAAA-MM-DD"}), 400
+
+        novo_lancamento = Operacoes(
+            operacoes_tipo=operacoes_tipo,
+            operacoes_descricao=operacoes_descricao,
+            operacoes_data=data_lancamento,
+            operacoes_valor=operacoes_valor,
+            contas_bancarias_id=contas_bancarias_id,
+            subcategorias_id=subcategorias_id,
+        )
+
+        db.session.add(novo_lancamento)
+        db.session.commit()
+        return (
+            jsonify(
+                {
+                    "mensagem": "Lançamento criado com sucesso!",
+                    "id": novo_lancamento.operacoes_id,
+                }
+            ),
+            201,
+        )
+
+
+# Rota para OBTER, ATUALIZAR ou DELETAR um lançamento específico
+@app.route("/lancamentos/<int:lancamento_id>", methods=["GET", "PUT", "DELETE"])
+def handle_lancamento(lancamento_id):
+    lancamento = Operacoes.query.get(lancamento_id)
+    if not lancamento:
+        return jsonify({"erro": "Lançamento não encontrado"}), 404
+
+    if request.method == "GET":
+        subcategoria = Subcategorias.query.get(lancamento.subcategorias_id)
+        conta_bancaria = ContasBancarias.query.get(lancamento.contas_bancarias_id)
+
+        return (
+            jsonify(
+                {
+                    "id": lancamento.operacoes_id,
+                    "tipo": lancamento.operacoes_tipo,
+                    "descricao": lancamento.operacoes_descricao,
+                    "data": str(lancamento.operacoes_data),
+                    "valor": str(lancamento.operacoes_valor),
+                    "conta": {
+                        "id": conta_bancaria.idcontas_bancarias,
+                        "nome": conta_bancaria.nome_conta,
+                    },
+                    "subcategoria": {
+                        "id": subcategoria.subcategorias_id,
+                        "nome": subcategoria.subcategorias_nome,
+                        "categoria": subcategoria.categoria.categorias_nome,
+                    },
+                }
+            ),
+            200,
+        )
+
+    elif request.method == "PUT":
+        data = request.json
+        lancamento.operacoes_tipo = data.get(
+            "operacoes_tipo", lancamento.operacoes_tipo
+        )
+        lancamento.operacoes_descricao = data.get(
+            "operacoes_descricao", lancamento.operacoes_descricao
+        )
+        lancamento.operacoes_data = data.get(
+            "operacoes_data", str(lancamento.operacoes_data)
+        )
+        lancamento.operacoes_valor = data.get(
+            "operacoes_valor", str(lancamento.operacoes_valor)
+        )
+        lancamento.contas_bancarias_id = data.get(
+            "contas_bancarias_id", lancamento.contas_bancarias_id
+        )
+        lancamento.subcategorias_id = data.get(
+            "subcategorias_id", lancamento.subcategorias_id
+        )
+
+        # Converte a string de data para um objeto date
+        try:
+            lancamento.operacoes_data = date.fromisoformat(lancamento.operacoes_data)
+        except ValueError:
+            return jsonify({"erro": "Formato de data inválido. Use AAAA-MM-DD"}), 400
+
+        db.session.commit()
+        return jsonify({"mensagem": "Lançamento atualizado com sucesso!"}), 200
+
+    elif request.method == "DELETE":
+        db.session.delete(lancamento)
+        db.session.commit()
+        return jsonify({"mensagem": "Lançamento deletado com sucesso!"}), 200
+
+
+# --- NOVAS ROTAS PARA CONTAS BANCÁRIAS ---
+
+
+# Rota para LISTAR todas as contas bancárias ou CRIAR uma nova
+@app.route("/contas-bancarias", methods=["GET", "POST"])
+def handle_contas_bancarias():
+    if request.method == "GET":
+        contas = ContasBancarias.query.all()
+        lista_contas = []
+        for conta in contas:
+            # Acessamos o objeto de relacionamento para obter o nome do tipo de conta
+            tipo_conta_obj = conta.tipo_conta_rel
+
+            lista_contas.append(
+                {
+                    "id": conta.idcontas_bancarias,
+                    "nome": conta.nome_conta,
+                    "tipo_conta": {
+                        "id": tipo_conta_obj.idtipos_contas,
+                        "nome": tipo_conta_obj.tipos_contas,
+                    },
+                    "saldo_inicial": (
+                        str(conta.conta_saldo_inicial)
+                        if conta.conta_saldo_inicial is not None
+                        else None
+                    ),
+                    "data_saldo_inicial": (
+                        str(conta.data_conta_saldo_incial)
+                        if conta.data_conta_saldo_incial is not None
+                        else None
+                    ),
+                }
+            )
+        return jsonify(lista_contas), 200
+
+    elif request.method == "POST":
+        data = request.json
+        nome_conta = data.get("nome_conta")
+        tipo_conta_id = data.get("tipo_conta")
+        saldo_inicial = data.get("conta_saldo_inicial")
+        data_saldo_inicial_str = data.get("data_conta_saldo_incial")
+
+        if not all([nome_conta, tipo_conta_id]):
+            return (
+                jsonify(
+                    {"erro": "Nome da conta e o ID do tipo de conta são obrigatórios."}
+                ),
+                400,
+            )
+
+        # Verifica se o tipo de conta existe
+        tipo_conta_relacionado = TiposContas.query.get(tipo_conta_id)
+        if not tipo_conta_relacionado:
+            return jsonify({"erro": "ID do tipo de conta não encontrado."}), 404
+
+        data_saldo_inicial = None
+        if data_saldo_inicial_str:
+            try:
+                data_saldo_inicial = date.fromisoformat(data_saldo_inicial_str)
+            except ValueError:
+                return (
+                    jsonify({"erro": "Formato de data inválido. Use AAAA-MM-DD"}),
+                    400,
+                )
+
+        nova_conta = ContasBancarias(
+            nome_conta=nome_conta,
+            tipo_conta=tipo_conta_id,
+            conta_saldo_inicial=saldo_inicial,
+            data_conta_saldo_incial=data_saldo_inicial,
+        )
+        db.session.add(nova_conta)
+        db.session.commit()
+        return (
+            jsonify(
+                {
+                    "mensagem": "Conta criada com sucesso!",
+                    "id": nova_conta.idcontas_bancarias,
+                }
+            ),
+            201,
+        )
+
+
+# Rota para OBTER, ATUALIZAR ou DELETAR uma conta específica
+@app.route("/contas-bancarias/<int:conta_id>", methods=["GET", "PUT", "DELETE"])
+def handle_conta_bancaria(conta_id):
+    conta = ContasBancarias.query.get(conta_id)
+    if not conta:
+        return jsonify({"erro": "Conta não encontrada"}), 404
+
+    if request.method == "GET":
+        tipo_conta_obj = conta.tipo_conta_rel
+        return (
+            jsonify(
+                {
+                    "id": conta.idcontas_bancarias,
+                    "nome": conta.nome_conta,
+                    "tipo_conta": {
+                        "id": tipo_conta_obj.idtipos_contas,
+                        "nome": tipo_conta_obj.tipos_contas,
+                    },
+                    "saldo_inicial": (
+                        str(conta.conta_saldo_inicial)
+                        if conta.conta_saldo_inicial is not None
+                        else None
+                    ),
+                    "data_saldo_inicial": (
+                        str(conta.data_conta_saldo_incial)
+                        if conta.data_conta_saldo_incial is not None
+                        else None
+                    ),
+                }
+            ),
+            200,
+        )
+
+    elif request.method == "PUT":
+        data = request.json
+        conta.nome_conta = data.get("nome_conta", conta.nome_conta)
+        conta.tipo_conta = data.get("tipo_conta", conta.tipo_conta)
+        conta.conta_saldo_inicial = data.get(
+            "conta_saldo_inicial", conta.conta_saldo_inicial
+        )
+        data_str = data.get("data_conta_saldo_incial")
+
+        if data_str:
+            try:
+                conta.data_conta_saldo_incial = date.fromisoformat(data_str)
+            except ValueError:
+                return (
+                    jsonify({"erro": "Formato de data inválido. Use AAAA-MM-DD"}),
+                    400,
+                )
+
+        db.session.commit()
+        return jsonify({"mensagem": "Conta atualizada com sucesso!"}), 200
+
+    elif request.method == "DELETE":
+        db.session.delete(conta)
+        db.session.commit()
+        return jsonify({"mensagem": "Conta deletada com sucesso!"}), 200
 
 
 # Bloco para executar a aplicação
