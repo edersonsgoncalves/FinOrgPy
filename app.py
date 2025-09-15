@@ -1,5 +1,5 @@
-from flask import Flask, jsonify, request
-from flask_sqlalchemy import SQLAlchemy
+# from flask_sqlalchemy import SQLAlchemy
+from flask import Flask, jsonify, request, Response
 from models import (
     db,
     TiposContas,
@@ -9,10 +9,13 @@ from models import (
     Operacoes,
     Cartoes,
     FaturasCartoes,
+    OperacoesRecorrente,
+    Recorrencias,
 )
 import os
 from dotenv import load_dotenv
-from datetime import date  # Importamos para usar datas
+from datetime import date
+from typing import Union, Tuple
 
 
 load_dotenv()
@@ -37,35 +40,53 @@ def home():
 
 # Rota para LISTAR todos os tipos de conta e para CRIAR um novo tipo
 @app.route("/tipos-contas", methods=["GET", "POST"])
-def handle_tipos_contas():
-    # LISTAR todos os tipos de conta
-    if request.method == "GET":
-        tipos_contas = TiposContas.query.all()
-        # Converte a lista de objetos para um dicionário para a resposta JSON
-        tipos_contas_list = [
-            {"id": tc.idtipos_contas, "nome": tc.tipos_contas} for tc in tipos_contas
-        ]
-        return jsonify(tipos_contas_list), 200
+def handle_tipos_contas() -> Union[Response, Tuple[Response, int]]:
+    try:
+        # LISTAR todos os tipos de conta
+        if request.method == "GET":
+            tipos_contas = TiposContas.query.all()
+            # Converte a lista de objetos para um dicionário para a resposta JSON
+            tipos_contas_list = [
+                {"id": tc.idtipos_contas, "nome": tc.tipos_contas}
+                for tc in tipos_contas
+            ]
+            return jsonify(tipos_contas_list), 200
 
-    # CRIAR um novo tipo de conta
-    elif request.method == "POST":
-        data = request.json
-        nome_tipo = data.get("tipos_contas")
-        if not nome_tipo:
-            return jsonify({"erro": "O nome do tipo de conta é obrigatório"}), 400
+        # CRIAR um novo tipo de conta
+        elif request.method == "POST":
+            try:
+                data = request.get_json(silent=True) or {}
+                nome_tipo = data.get("tipos_contas")
+                if not nome_tipo:
+                    return (
+                        jsonify({"erro": "O nome do tipo de conta é obrigatório"}),
+                        400,
+                    )
 
-        novo_tipo = TiposContas(tipos_contas=nome_tipo)
-        db.session.add(novo_tipo)
-        db.session.commit()
-        return (
-            jsonify(
-                {
-                    "mensagem": "Tipo de conta criado com sucesso!",
-                    "id": novo_tipo.idtipos_contas,
-                }
-            ),
-            201,
-        )
+                novo_tipo = TiposContas(tipos_contas=nome_tipo)
+                db.session.add(novo_tipo)
+                db.session.commit()
+                return (
+                    jsonify(
+                        {
+                            "mensagem": "Tipo de conta criado com sucesso!",
+                            "id": novo_tipo.idtipos_contas,
+                        }
+                    ),
+                    201,
+                )
+            except Exception as e:
+                return (
+                    jsonify({"erro": "Erro ao processar JSON", "detalhes": str(e)}),
+                    400,
+                )
+    except Exception as e:
+        # Tratamento de erro para garantir que sempre retorne algo
+        return jsonify({"erro": "Erro interno do servidor", "detalhes": str(e)}), 500
+
+    # Retorno padrão caso nenhum dos métodos acima seja atendido
+    # Isso evita que a função retorne None implicitamente
+    return jsonify({"erro": "Método não permitido"}), 405
 
 
 # Rota para OBTER, ATUALIZAR ou DELETAR um tipo de conta específico
@@ -701,6 +722,121 @@ def handle_faturas_por_cartao(cartao_id):
                 {
                     "mensagem": "Fatura criada com sucesso!",
                     "id": nova_fatura.faturasCartoesId,
+                }
+            ),
+            201,
+        )
+
+
+# --- NOVAS ROTAS PARA TEMPLATES DE LANÇAMENTOS RECORRENTES ---
+
+
+# Rota para LISTAR todos os templates ou CRIAR um novo
+@app.route("/lancamentos-recorrentes", methods=["GET", "POST"])
+def handle_templates_recorrentes():
+    if request.method == "GET":
+        templates = OperacoesRecorrente.query.all()
+        lista_templates = []
+        for template in templates:
+            lista_templates.append(
+                {
+                    "id": template.recorrencia_id,
+                    "descricao": template.recorrencia_descricao,
+                    "valor": str(template.recorrencia_valor),
+                    "tipo": template.recorrencia_tipo,
+                    "categoria": template.recorrencia_categoria,
+                    "fatura": template.recorrencia_fatura,
+                }
+            )
+        return jsonify(lista_templates), 200
+
+    elif request.method == "POST":
+        data = request.json
+        descricao = data.get("recorrencia_descricao")
+        valor = data.get("recorrencia_valor")
+        tipo = data.get("recorrencia_tipo")
+        categoria = data.get("recorrencia_categoria")
+
+        if not all([descricao, valor, tipo, categoria]):
+            return jsonify({"erro": "Campos obrigatórios incompletos"}), 400
+
+        novo_template = OperacoesRecorrente(
+            recorrencia_descricao=descricao,
+            recorrencia_valor=valor,
+            recorrencia_tipo=tipo,
+            recorrencia_categoria=categoria,
+        )
+        db.session.add(novo_template)
+        db.session.commit()
+        return (
+            jsonify(
+                {
+                    "mensagem": "Template de lançamento recorrente criado com sucesso!",
+                    "id": novo_template.recorrencia_id,
+                }
+            ),
+            201,
+        )
+
+
+# --- NOVAS ROTAS PARA REGRAS DE RECORRÊNCIA ---
+
+
+# Rota para LISTAR todas as regras ou CRIAR uma nova
+@app.route("/regras-recorrencia", methods=["GET", "POST"])
+def handle_regras_recorrencia():
+    if request.method == "GET":
+        regras = Recorrencias.query.all()
+        lista_regras = []
+        for regra in regras:
+            lista_regras.append(
+                {
+                    "id": regra.recorrencia_id,
+                    "operacao_id": regra.operacao_id,
+                    "descricao": regra.recorrencia_descricao,
+                    "frequencia": regra.frequencia,
+                    "data_inicio": str(regra.data_inicio),
+                    "data_fim": str(regra.data_fim) if regra.data_fim else None,
+                    "status": regra.status,
+                }
+            )
+        return jsonify(lista_regras), 200
+
+    elif request.method == "POST":
+        data = request.json
+        operacao_id = data.get("operacao_id")
+        frequencia = data.get("frequencia")
+        data_inicio_str = data.get("data_inicio")
+        status = data.get("status", "Ativo")  # Valor padrão para 'status'
+
+        if not all([operacao_id, frequencia, data_inicio_str]):
+            return jsonify({"erro": "Campos obrigatórios incompletos"}), 400
+
+        try:
+            data_inicio = date.fromisoformat(data_inicio_str)
+        except ValueError:
+            return jsonify({"erro": "Formato de data inválido. Use AAAA-MM-DD"}), 400
+
+        nova_regra = Recorrencias(
+            operacao_id=operacao_id,
+            recorrencia_descricao=data.get("recorrencia_descricao"),
+            frequencia=frequencia,
+            data_inicio=data_inicio,
+            data_fim=(
+                date.fromisoformat(data.get("data_fim"))
+                if data.get("data_fim")
+                else None
+            ),
+            status=status,
+        )
+
+        db.session.add(nova_regra)
+        db.session.commit()
+        return (
+            jsonify(
+                {
+                    "mensagem": "Regra de recorrência criada com sucesso!",
+                    "id": nova_regra.recorrencia_id,
                 }
             ),
             201,
