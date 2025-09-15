@@ -1,6 +1,7 @@
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import Numeric, Date, ForeignKey
-from sqlalchemy.orm import relationship
+
+# from sqlalchemy import Numeric, Date, ForeignKey
+# from sqlalchemy.orm import relationship
 
 # Cria uma instância do SQLAlchemy
 db = SQLAlchemy()
@@ -15,6 +16,9 @@ class TiposContas(db.Model):
         "ContasBancarias", backref="tipo_conta_rel", lazy=True
     )
 
+    def __init__(self, tipos_contas: str):  # Pode ser 'nome' em vez de 'tipos_contas'
+        self.tipos_contas = tipos_contas
+
 
 # 2. Tabela categorias
 class Categorias(db.Model):
@@ -23,7 +27,7 @@ class Categorias(db.Model):
     categorias_nome = db.Column(db.String(255), nullable=False)
     categorias_classe = db.Column(db.Integer, nullable=False)
     subcategorias = db.relationship(
-        "Subcategorias", backref="categoria_pai", lazy=True
+        "Subcategorias", backref="categorias_id", lazy=True
     )  # Nome alterado para refletir 'categorias_pai'
 
 
@@ -35,7 +39,7 @@ class Subcategorias(db.Model):
     # Coluna 'subcategorias_classe' no seu DB
     subcategorias_classe = db.Column(db.Integer, nullable=False)
     # Nova chave estrangeira para o pai
-    categorias_pai = db.Column(db.Integer, db.ForeignKey("categorias.categorias_id"))
+    categorias_id = db.Column(db.Integer, db.ForeignKey("categorias.categorias_id"))
 
     operacoes = db.relationship("Operacoes", backref="subcategoria", lazy=True)
 
